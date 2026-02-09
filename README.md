@@ -1,155 +1,107 @@
-# Project KIWI: Intelligent App Review Analysis & RAG System
-
-**Project KIWI**는 앱 스토어(Google Play, App Store)의 리뷰 데이터를 수집하고, **Deep Learning(ABSA)** 및 **LLM(RAG)** 기술을 활용하여 사용자 반응을 심층 분석하는 통합 플랫폼입니다.
-
-수집된 데이터는 문장 단위로 분리되어 감성 및 속성(Aspect)을 분석하며, 분석된 결과는 LLM을 통해 인사이트 리포트로 생성됩니다. 사용자는 웹 인터페이스(Django)를 통해 리포트를 확인하거나, 챗봇에게 자연어로 질의하여 분석 결과에 기반한 답변을 얻을 수 있습니다.
-
----
-
-## 🔄 System Architecture (Workflow)
-
-```mermaid
-graph LR
-    A[Crawler] -->|Raw Data| B(Database MySQL)
-    B -->|Preprocessing| C[Sentence Splitter KSSDS]
-    C -->|Text Segments| D{Analyzer}
-    D -->|ABSA Model KcELECTRA| B
-    D -->|LLM Labeling Gemini| B
-    B -->|Structured Data| E[Report Generator]
-    E -->|Markdown Report| B
-    B -->|Knowledge Base| F[RAG System Vector DB]
-    F --> G[Django Web Interface]
-```
-
-## ✨ Key Features
-
-1.  **Automated Crawling**: Google Play & App Store 리뷰 자동 수집.
-2.  **Advanced Preprocessing**: `KSSDS` 및 `soynlp`를 활용한 한국어 구어체 문장 분리 및 정규화.
-3.  **ABSA (Aspect-Based Sentiment Analysis)**: `KcELECTRA` 기반 딥러닝 모델로 리뷰의 특정 속성(디자인, 성능 등)과 감정(긍정/부정) 동시 분석.
-4.  **AI Insight Report**: Google Gemini를 활용한 버전별/장르별 자동 분석 리포트 생성.
-5.  **Interactive RAG Chatbot**: `LangChain`, `Groq`, `ChromaDB`를 연동하여 리뷰 데이터를 기반으로 답변하는 챗봇 구축.
-6.  **Web Dashboard**: Django 기반의 시각화 및 리포트 뷰어.
+# Project KIWI: 앱 리뷰 속성 분석 및 RAG 기반 인사이트 도출 시스템
+> **Aspect-Based Sentiment Analysis (ABSA) & Retrieval-Augmented Generation (RAG)**
+> 
+> 단순히 별점 수치를 확인하는 것을 넘어, 사용자가 앱의 어느 부분(디자인, 성능, 가격 등)에 대해 어떤 감정을 느끼는가 분석하고, 이를 바탕으로 AI와 대화하며 인사이트를 도출하는 B2B 타겟 인사이트 엔진을 만들고자 했습니다.
 
 ---
 
-## 🛠️ Environment Setup
+## 1. 프로젝트 목적 및 핵심 로직
+> 수만 개의 리뷰를 사람이 직접 분석하기엔 시간이 너무 많이 듭니다. 이를 해결하기 위해, 실제 앱을 사용하고 후기를 남기는 곳인 playstor의 앱 리뷰를 수집하였습니다.
+> 앱 리뷰를 ABSA분석하기 위해 훈련 모델 구축을 해야했고, playstore의 앱 리뷰 특성상 비정형화된 데이터가 많기 때문에 이런 데이터를 많이 학습한 KcELECTRA 모델을 활용하였습니다.
+> 훈련 데이터를 만들고자 playstore와 유사한 apple app store의 분석할 앱과 동일한 환경에서 데이터를 수집하였고, Gemini_API를 통해 ABSA 라벨링을 자동화 하였습니다.
+> 리뷰 데이터의 문장이 길 경우 ABSA 라벨링이 어려운 점을 고려하여 KSSDS를 활용하여 리뷰를 커팅한 후 라벨링을 시도하였습니다.
+> 데이터의 불균형 문제를 해결하기 위해 CrossEntropyLoss를 활용하여 가중치를 설정하였습니다.
+> 보고서를 작성하기 위해 페르소나 부여, Few-shot 방식을 통해 프롬프트를 강화하였으며, 추후 RAG 메타데이터 태깅에 유리하도록 출력 방식을 마크다운 언어로 고정시켜 구조화된 보고서를 작성하였습니다.
+> RAG의 답변 품질을 높이고자, 2개의 경량 llm 모델로 답변을 1차 생성한 후 성능이 좋은 모델에게 답변을 넘겨 환각을 방지하고자 노력했습니다.
+> bm25와 vector Retrieval를 앙상블하여 검색 품질을 높이고자 노력하였습니다.
 
-### 1. Prerequisites
-*   **Python**: 3.10 (권장) 또는 3.11
-*   **Database**: MySQL (MariaDB)
-*   **Java (JDK)**: KoNLPy 실행을 위해 필요
-*   **API Keys**: Google Gemini API, Groq API, OpenAI API (Optional)
+### 데이터 흐름 (Pipeline)
+1. **Data Collection**: 스토어별 리뷰 크롤링
+2. **Preprocessing**: KSSDS 기반 문장 단위 분리 및 soynlp 라이브러리를 활용하여 반복된 단어 정제
+3. **Inference**: KcELECTRA 모델을 이용한 속성(Aspect) 및 감성(Sentiment) 분류
+4. **Knowledge Base**: 분석 결과를 리포트화하여 벡터 데이터베이스(ChromaDB) 저장
+5. **Interactive AI**: RAG 기반 챗봇을 통해 분석 결과에 대한 질의응답 제공
 
-### 2. Unified Installation
-프로젝트의 모든 모듈(크롤링, 분석, 웹, RAG)을 실행하기 위한 통합 라이브러리 설치 명령어입니다.
-
-```bash
-# 가상환경 생성 권장
-conda create -n kiwi_env python=3.10
-conda activate kiwi_env
-
-# 1. Crawling
-pip install pandas pymysql python-dotenv cryptography tqdm
-
-# 2. front(Django)
-pip install django daphne markdown pdfkit
-
-# 3. NLP & Preprocessing (KSSDS)
-pip install KSSDS soynlp
-pip uninstall transformers -y
-pip install transformers==4.30.2  # KSSDS 호환성 유지
-
-# 4. fine_tuning (Torch/HuggingFace)
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-pip install -U accelerate scikit-learn
-
-# 5. report_creater & rag
-pip install langchain chromadb google-generativeai google-play-scraper
-pip install sentence-transformers
-pip install groq
-```
-*(참고: Windows 사용자의 경우 `pdfkit` 사용을 위해 [wkhtmltopdf](https://wkhtmltopdf.org/downloads.html) 별도 설치가 필요합니다.)*
+### 핵심 차별점: ABSA (속성 기반 감성 분석)
+단순 긍/부정 분류가 아닌 **속성 기반 분석**을 도입하여, 한 문장 안에 섞인 복합적인 의견을 정확히 해석합니다.
+> *예: "배터리는 소모가 빠르지만(성능-부정), 디자인은 예쁘다(디자인-긍정)"*
 
 ---
 
-## ⚙️ Configuration
+## 2. 주요 기술 스택 및 선택 이유
 
-### 1. Database Schema
-MySQL에 접속하여 `kiwi` 데이터베이스 및 테이블을 생성해야 합니다.
-(상세 SQL 스크립트는 `crawling/README.md`를 참조하세요.)
+| 구분 | 기술 스택 | 선택 이유 |
+| :--- | :--- | :--- |
+| **Model** | **KcELECTRA** | 한국어 구어체, 신조어, 비속어에 강점이 있어 앱 리뷰 분석에 최적화됨 |
+| **NLP** | **KSSDS** | 한국어 특유의 문장 구조를 반영하여 통계적으로 정확한 문장 분리 수행 |
+| **RAG** | **LangChain / ChromaDB** | 리포트 데이터를 벡터화하여 근거 기반(Context-aware) 답변 시스템 구축 |
+| **LLM** | **Gemini API** | 분석 데이터 요약 및 자연스러운 스토리텔링형 리포트 생성 |
 
-### 2. Environment Variables (.env)
-프로젝트 루트 디렉토리에 `.env` 파일을 생성하고 아래 정보를 입력하세요.
+---
 
-```ini
-host=127.0.0.1
-port=3306
-user=사용자명
-passwd=비밀번호
-dbname=데이터베이스명
+## 3. 개발 과정의 고충과 해결 (Troubleshooting)
 
-# API Keys
-GEMINI_API_KEY=your_gemini_key
-GROQ_API_KEY=your_groq_key
-OPENAI_API_KEY=your_openai_key  # (선택 사항)
+### [문제 1] 데이터 ABSA 라벨 정의
+*   **현상**: 앱 마다 사용자 리뷰의 문제점 제기가 각각 다르고, 단순 비방이나 칭찬을 하는 경우 발생
+*   **해결**: 카테고리가 유사한 앱일 경우 공통으로 나오는 Aspect를 나열, 단순 비방이나 칭찬의 경우 분석에 도움이 되지 않아 '의견없음'으로 처리
+
+### [문제 2] 문장 분리 시스템
+*   **현상**: 초기에 종결어미, 온점, 마침표나 느낌표 등으로 끝날 경우 문장을 분류하고 했지만 너무 지저분하게 분류되는 현상 발생 
+*   **해결**: 한국어를 잘 분류하는 KIWI의 엔진을 쓰는 KSSDS 라이브러리를 서칭한 후에 발견하여 해당 라이브러리를 사용한 결과 문장이 매끄럽게 분류되는 것을 발견
+
+### [문제 3] 라벨링 데이터 불균형
+*   **현상**: Gemini API로 훈련 데이터를 라벨링 한 결과 데이터가 불균형하여 그대로 파인튜닝하기에는 부적절함을 발견
+*   **해결**: CrossEntropyLoss를 활용하여 데이터가 적은 라벨링에 가중치를 부여하여 모델 정확도 상승
+
+### [문제 4] Aspect와 Sentiment의 동시 라벨링  
+*   **현상**: 모델이 Aspect와 Sentiment를 분석해야하는데 각각 따로할 경우 시간이 너무 많이 소비됨
+*   **해결**: Multi-Head 를 통해 모델이 한 개의 문장에 대해 Aspect와 Sentiment를 분류하도록 로직 설계
+
+### [문제 5] 훈련 데이터의 데이터 부족으로 인한 모델 과적합 발생 가능  
+*   **현상**: 훈련데이터가 5,737개로 딥러닝을 하기엔 데이터가 적어 과적합 가능성 존재
+*   **해결**: Dropout(0.1), warmup_steps를 활용하여 과적합 방지, Aspect와 Sentiment 의 loss를 더하여 가장 loss가 적었던 순간의 모델을 저장
+
+### [문제 6] 보고서의 일관성
+*   **현상**: 보고서 작성시 데이터만 전달할 경우 Gemini가 중구난방으로 작성하여 일관되어있지 않음
+*   **해결**: Output Format을 프롬프트에 작성하여 일관되게 보고서를 작성할 수 있도록 설계
+
+### [문제 7] 메타 데이터 청킹 방식
+*   **현상**: Croma DB에 메타데이터 청킹의 방식에서의 고찰 필요
+*   **해결**: 보고서가 markdown 형식으로 작성되어 MarkdownHeaderTextSpliter로 텍스트를 나눠 각 청크가 어떤 카테고리에 속하는지 설계
+
+### [문제 8] 검색 정확도 저하
+*   **현상**: 본문 내용만 벡터화 진행 시 특정 키워드나 핵심 주제어로 검색했을 때 관련 결과가 잘 안나오는 경우 발생
+*   **해결**: KeyBERT와 llm을 앙상블하여 키워드, 요약을 추출한 후 메타데이터 태깅
+
+### [문제 9] fail_list
+*   **현상**: 대량의 문서를 vector화 시켜야하는데 도중 오류가 발생하거나 수정된 경우 Croma DB를 삭제하고 다시 해야하는 경우 발생
+*   **해결**: 보고서 테이블에 vectorized_at 컬럼을 추가하여 vector화 되었는지 체크하고, 안 된 것들만 진행하도록 로직 변경
+
+---
+
+## 4. 구동 화면 및 결과물
++ [Youtube 바로가기](https://youtu.be/xpmZvyyGw4Q)
+---
+
+## 5. 프로젝트 구조
+```bash
+├── crawling/          # 스토어별 리뷰 수집 (Google Play, App Store)
+├── splitter/          # KSSDS 기반 문장 분리 및 전처리 모듈
+├── fine_tuning/       # KcELECTRA 모델 학습 및 속성/감성 추론 스크립트
+├── report_creator/    # Gemini API를 활용한 마크다운 리포트 생성기
+├── rag/               # LangChain 기반 Vector DB 구축 및 질의응답 엔진
+├── front/             # Django 기반 웹 인터페이스 및 데이터 시각화
+└── requirements.txt   # 환경 설정 및 의존성 패키지
 ```
 
 ---
 
-## 📂 Project Structure
+## 6. 마치며
 
-| Module | Directory | Description |
-|---|---|---|
-| **Crawling** | `/crawling` | Google Play(`google-play-scraper`) 및 `/app_store_cralwer` iOS 리뷰 수집 스크립트 |
-| **Preprocessing** | `/splitter` | 수집된 리뷰를 `KSSDS`를 이용해 문장 단위로 분리 및 DB 저장 |
-| **ABSA Model** | `/fine_tuning` | `KcELECTRA` 기반 감성/속성 분류 모델 학습(`train`) 및 추론(`predict`) |
-| **Analysis** | `/report_creater` | Gemini를 이용한 리포트 생성 및 데이터 가공 (`main.py`) |
-| **RAG System** | `/rag` | 리포트 데이터 벡터화(`ingest_db.py`) 및 챗봇 엔진 구현 |
-| **Frontend** | `/front` | Django 웹 서버, 리포트 뷰어 및 챗봇 UI 제공 |
+### 🎯 배운 점
+*   딥러닝 모델의 아키텍처만큼이나 중요한 것은 '데이터를 어떻게 도메인에 맞게 정제하느냐(Pre-processing)'라는 것을 깨달았습니다.
+*   RAG 구조를 직접 구현하며 LLM의 답변 신뢰도를 높이는 실전적인 기법을 익혔습니다.
 
----
-
-## 🚀 Quick Start Guide
-
-전체 파이프라인을 순서대로 실행하는 방법입니다.
-
-### Step 1. 데이터 수집 (Crawling)
-```bash
-# App Store 리뷰 수집 및 DB 적재 (훈련 데이터)
-python app_store_cralwer/app_store_crawler.py
-# google-play store 리뷰 수집 및 DB 적재 (실제 데이터)
-python crawling/crawler.py
-```
-
-### Step 2. 전처리 (Splitting)
-```bash
-# 수집된 리뷰를 문장 단위로 분리하여 review_line 테이블에 저장
-python splitter/kssds_line_splitter.py
-```
-
-### Step 3. 분석 수행 (ABSA / Labeling)
-```bash
-# 훈련 데이터 라벨링
-python fine_tuning/labeling.py
-# 딥러닝 모델 또는 LLM을 사용하여 문장별 속성/감성 분석
-python fine_tuning/predict2.py 
-```
-
-### Step 4. 리포트 생성 (Report Gen)
-```bash
-# 분석 데이터를 종합하여 마크다운 리포트 생성 및 DB 저장
-python report_creater/main.py
-```
-
-### Step 5. RAG 데이터 적재
-```bash
-# 생성된 리포트를 벡터 DB(Chroma)에 임베딩하여 검색 가능하게 처리
-python rag/ingest_db.py
-```
-
-### Step 6. 웹 서버 실행
-```bash
-# Django 서버 실행 (http://127.0.0.1:8000)
-cd mysite
-python manage.py runserver
-```
+### 🚀 향후 개선 과제
+*   버전별로 계속 언급된 문제점이 개선되었는지, 종합적으로 어떤 Aspect의 대한 언급이 많이 나왔는지 통계적인 기법을 추가하면 좀 더 완성도 있는 결과가 나올 것으로 예상.
+*   현재 6가지인 속성 분류 카테고리를 산업군에 맞게 자동 확장하는 알고리즘 연구.
